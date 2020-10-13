@@ -25,6 +25,7 @@ class CheckpointHandler(ModelCheckpoint):
     def __call__(self, engine: Engine, to_save: types.GenericDict) -> None:
         super(CheckpointHandler, self).__call__(engine, to_save)
         # Select model with best loss
+        #import ipdb; ipdb.set_trace()
         _, paths = self._saved[-1]
         for src in paths:
             splitted = src.split('_')

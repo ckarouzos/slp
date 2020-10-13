@@ -34,6 +34,7 @@ class ConditionalEntropyLoss(nn.Module):
         super(ConditionalEntropyLoss, self).__init__()
 
     def forward(self, x):
+        import ipdb; ipdb.set_trace()
         b = F.softmax(x, dim=1) * F.log_softmax(x, dim=1)
         b = b.sum(dim=1)
         return -1.0 * b.mean(dim=0)
@@ -106,8 +107,8 @@ class VADALoss(nn.Module):
         loss_vat_s = 0
         loss_vat_t = 0
         loss_d = self.loss_fn_d(domain_pred, domain_targets) if self.a>0 else 0
-        a = self.calc_a(epoch, step)
-        return loss_cl + a * loss_d + self.b * loss_ce + self.c *  loss_vat_s + self.c * loss_vat_t #NOTSURE
+        #a = self.calc_a(epoch, step)
+        return loss_cl + self.a * loss_d #+ self.b * loss_ce + self.c *  loss_vat_s + self.c * loss_vat_t #NOTSURE
 
 class VADAClassifier(nn.Module):
     def __init__(self, encoder, encoded_features, num_classes, num_domains):

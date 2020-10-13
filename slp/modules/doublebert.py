@@ -1,16 +1,17 @@
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.utils.data.sampler import Sampler
-from torch.nn.utils.rnn import pad_sequence
-from torch.nn import CrossEntropyLoss, MSELoss
 from torch.autograd import Variable
-from slp.modules.regularization import GaussianNoise
-from slp.util import mktensor
-import numpy as np
-
+from torch.nn import CrossEntropyLoss, MSELoss
+from torch.nn.utils.rnn import pad_sequence
+from torch.utils.data.sampler import Sampler
 from transformers import *
 from transformers.modeling_bert import BertPreTrainingHeads
+
+from slp.modules.regularization import GaussianNoise
+from slp.util import mktensor
+
 
 class DoubleHeadBert(BertPreTrainedModel):
     def __init__(self, config):
@@ -58,6 +59,7 @@ class DoubleHeadBert(BertPreTrainedModel):
         logits = self.classifier(pooled_output)
 
         loss = None
+
         if source == 0 :
             if labels is not None:
                 if self.num_labels == 1:
@@ -69,9 +71,11 @@ class DoubleHeadBert(BertPreTrainedModel):
                     loss = loss_fct(logits.view(-1, self.num_labels), labels.view(-1))
             
             output = (logits,) + outputs[2:]
+
             return ((loss,) + output) if loss is not None else output
         else:    
             total_loss = None
+
             if labels is not None: #and next_sentence_label is not None:
                 loss_fct = CrossEntropyLoss()
                 masked_lm_loss = loss_fct(prediction_scores.view(-1, self.config.vocab_size), labels.view(-1))
@@ -79,6 +83,7 @@ class DoubleHeadBert(BertPreTrainedModel):
                 total_loss = masked_lm_loss #+ next_sentence_loss
             
             output = (prediction_scores,) + outputs[2:]
+
             return ((total_loss,) + output) if total_loss is not None else output
 
 class BertDCollator(object):
@@ -94,11 +99,13 @@ class BertDCollator(object):
                                 batch_first=True,
                                 padding_value=self.pad_indx)
                    .to(self.device))
+
         return tensors
 
     @staticmethod
     def get_inputs_and_targets(batch):
         inputs, targets, domains = map(list, zip(*batch))
+
         return inputs, targets, domains
 
     def __call__(self, batch):
@@ -107,6 +114,7 @@ class BertDCollator(object):
         inputs = mktensor(inputs, device=self.device, dtype=torch.long)
         targets = mktensor(targets, device=self.device, dtype=torch.long)
         domains = mktensor(domains, device=self.device, dtype=torch.long)
+
         return inputs, targets.to(self.device), domains.to(self.device)
 
 class BertLMCollator(object):
@@ -126,6 +134,7 @@ class BertLMCollator(object):
     @staticmethod
     def get_inputs_and_targets(batch):
         inputs, targets, domains = map(list, zip(*batch))
+
         return inputs, targets, domains
     
     def mask_tokens(self, inputs):
@@ -141,6 +150,7 @@ class BertLMCollator(object):
             self.tokenizer.get_special_tokens_mask(val, already_has_special_tokens=True) for val in labels.tolist()
         ]
         probability_matrix.masked_fill_(torch.tensor(special_tokens_mask, dtype=torch.bool), value=0.0)
+
         if self.tokenizer._pad_token is not None:
             padding_mask = labels.eq(self.tokenizer.pad_token_id)
             probability_matrix.masked_fill_(padding_mask, value=0.0)
@@ -154,6 +164,7 @@ class BertLMCollator(object):
         random_words = torch.randint(len(self.tokenizer), labels.shape, dtype=torch.long)
         inputs[indices_random] = random_words[indices_random]
         # The rest of the time (10% of the time) we keep the masked input tokens unchanged
+
         return inputs, labels
 
     def pad(self, tensors):
@@ -164,6 +175,7 @@ class BertLMCollator(object):
                                 batch_first=True,
                                 padding_value=self.pad_indx)
                    .to(self.device))
+
         return tensors
     
     def __call__(self, batch):
@@ -173,6 +185,7 @@ class BertLMCollator(object):
         inputs = mktensor(inputs, device=self.device, dtype=torch.long)
         targets = mktensor(targets, device=self.device, dtype=torch.long)
         domains = mktensor(domains, device=self.device, dtype=torch.long)
+
         return inputs, targets.to(self.device), domains.to(self.device)
 
 class DoubleBertCollator(object):
@@ -183,10 +196,12 @@ class DoubleBertCollator(object):
     @staticmethod
     def get_inputs_and_targets(batch):
         inputs, targets, domains = map(list, zip(*batch))
+
         return inputs, targets, domains
 
     def __call__(self, batch):
         inputs, targets, domains = self.get_inputs_and_targets(batch)
+
         if domains[0]==0:
             return self.collatorA(batch)
         else: 
@@ -201,32 +216,54 @@ class DoubleSubsetRandomSampler(Sampler):
         self.num_target = num_target
 
     def __iter__(self):
+        # import ipdb; ipdb.set_trace()
         perm = torch.randperm(len(self.indices_source))
         tarperm = torch.randperm(len(self.indices_target))
         T = 0
         t = 0
+
         for i,s in enumerate(perm,1):
             yield self.indices_source[s]
+
             if i % self.num_source == 0:
                 for j in range(self.num_target):
                     t = T + j
-                    yield self.s_dataset_size + self.indices_target[tarperm[t]]
+                    # yield self.s_dataset_size + self.indices_target[tarperm[t]]
+                    if len(self.indices_target)<500:
+                        if tarperm[t]>395:
+                            import ipdb; ipdb.set_trace()
+                    yield self.indices_target[tarperm[t]]
                 T = t + 1
 
     def __len__(self):
         full = int(np.floor((len(self.indices_source) +len(self.indices_target)) / self.num_source))
         last = len(self.indices_source) % self.num_source
+
         return int(full * self.num_source + last)
 
 class DoubleLoss(nn.Module):
    def __init__(self, loss_fn):
        super(DoubleLoss, self).__init__()
        self.loss_fn = loss_fn
+       self.size =30522
    
    def forward(self, pred, tar, domains):
        #import ipdb; ipdb.set_trace()
        if not domains[0]:
           loss = self.loss_fn(pred, tar)
        else:
-          loss = torch.tensor(0)
+          loss = self.loss_fn(pred.view(-1, self.size), tar.view(-1))
+
        return loss
+
+class DoubeLossCE(nn.Module):
+    def __init__(self, loss_fn):
+        super(DoubeLossCE, self).__init__()
+        self.loss_fn = loss_fn
+    def forward(self, pred, tar, domains):
+        if not domains[0]:
+            loss = self.loss_fn(pred, tar)
+        else:
+            loss = torch.tensor(0)
+
+        return loss

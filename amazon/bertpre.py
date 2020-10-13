@@ -1,3 +1,4 @@
+import os
 import numpy as np
 
 import torch
@@ -60,7 +61,7 @@ DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 collate_fn = BertCollator(device='cpu')
 
 if __name__ == '__main__':
-    dataset = AmazonZiser17(ds=SOURCE, dl=0, labeled=True)
+    dataset = AmazonZiser17(ds=SOURCE, dl=0, labeled=True, cldata=False)
 
     dataset_size = len(dataset)
     indices = list(range(dataset_size))
@@ -85,13 +86,13 @@ if __name__ == '__main__':
         collate_fn=collate_fn)
 
     if TARGET == "books":
-       pre = './abooks'
+       pre = './obooks'
     elif TARGET == "dvd":
-       pre = './advd'
+       pre = './odvd'
     elif TARGET == "electronics":
-       pre = './aele'
+       pre = './oele'
     else:
-       pre = './akit'
+       pre = './okit'
 
     #config = BertConfig.from_json_file('./config.json')
     #bertmodel = BertModel.from_pretrained('bert-base-uncased')
@@ -101,14 +102,15 @@ if __name__ == '__main__':
 
     #optimizer = Adam([p for p in model.parameters() if p.requires_grad], lr=1e-3)
     optimizer = AdamW(model.parameters(), lr=1e-5, correct_bias=False)
-    criterion = nn.CrossEntropyLoss() 
+    criterion = nn.CrossEntropyLoss()
     metrics = {
         'loss': Loss(criterion),
         'accuracy': Accuracy()
     }
+    path = SOURCE + TARGET
     trainer = BertTrainer(model, optimizer,
                       newbob_period=3,
-                      checkpoint_dir='./checkpoints/bert',
+                      checkpoint_dir=os.path.join('./checkpoints/out/bertpre/', path),
                       metrics=metrics,
                       non_blocking=True,
                       retain_graph=True,
@@ -116,19 +118,21 @@ if __name__ == '__main__':
                       loss_fn=criterion,
                       device=DEVICE,
                       parallel=False)
-    trainer.fit(train_loader, val_loader, epochs=10)
+    #trainer.fit(train_loader, val_loader, epochs=10)
     trainer = BertTrainer(model, optimizer=None,
-                      checkpoint_dir='./checkpoints/bert',
+                      checkpoint_dir=os.path.join('./checkpoints/out/bertpre/', path),
                       model_checkpoint='experiment_model.best.pth',
                       device=DEVICE)
     #for TARGET in targets:
-    dataset2 = AmazonZiser17(ds=TARGET, dl=1, labeled=True, train=False)
+    dataset2 = AmazonZiser17(ds=TARGET, dl=1, labeled=True, cldata=False)
     test_loader = DataLoader(
          dataset2,
          batch_size=1,
          drop_last=False,
          collate_fn=collate_fn)
-    print(SOURCE)
-    print(TARGET)
-    print(evaluation(trainer, test_loader, DEVICE))
+    file = "PT"+ path + ".txt"
+    with open(file, "w") as f:
+        print(SOURCE, file=f)
+        print(TARGET, file=f)
+        print(evaluation(trainer, test_loader, DEVICE), file=f)
 

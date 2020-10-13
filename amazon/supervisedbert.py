@@ -23,12 +23,12 @@ from slp.util.parallel import DataParallelCriterion, DataParallelModel
 
 import argparse
 parser = argparse.ArgumentParser(description="Domains and losses")
-parser.add_argument("-s", "--source", default="books", help="Source Domain")
-#parser.add_argument("-t", "--target", default="dvd", help="Target Domain")
+#parser.add_argument("-s", "--source", default="books", help="Source Domain")
+parser.add_argument("-t", "--target", default="dvd", help="Target Domain")
 args = parser.parse_args()
-SOURCE = args.source
-#TARGET = args.target
-targets = ["dvd", "books", "electronics", "kitchen"]
+#SOURCE = args.source
+TARGET = args.target
+targets = ["dvd"]
 
 def transform_pred_tar(output):
     y_pred, targets, d  = output
@@ -62,7 +62,7 @@ DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 collate_fn = BertCollator(device='cpu')
 
 if __name__ == '__main__':
-    dataset = AmazonZiser17(ds=SOURCE, dl=0, labeled=True, cldata=False)
+    dataset = AmazonZiser17(ds=TARGET, dl=0, labeled=True, cldata=False, supervised=True)
 
     dataset_size = len(dataset)
     indices = list(range(dataset_size))
@@ -87,18 +87,18 @@ if __name__ == '__main__':
         collate_fn=collate_fn)
 
     #bertmodel = BertModel.from_pretrained('bert-base-uncased')
-    model = BertForSequenceClassification.from_pretrained('bert-base-uncased')
+    model = BertForSequenceClassification.from_pretrained('./odvd')
 
     #optimizer = Adam([p for p in model.parameters() if p.requires_grad], lr=1e-3)
     optimizer = AdamW(model.parameters(), lr=1e-5, correct_bias=False)
-    criterion = nn.CrossEntropyLoss()
+    criterion = nn.CrossEntropyLoss() 
     metrics = {
         'loss': Loss(criterion),
         'accuracy': Accuracy()
     }
     trainer = BertTrainer(model, optimizer,
                       newbob_period=3,
-                      checkpoint_dir=os.path.join('./checkpoints/out/bert',SOURCE),
+                      checkpoint_dir=os.path.join('./checkpoints/bert', TARGET),
                       metrics=metrics,
                       non_blocking=True,
                       retain_graph=True,
@@ -106,23 +106,18 @@ if __name__ == '__main__':
                       loss_fn=criterion,
                       device=DEVICE,
                       parallel=False)
-    trainer.fit(train_loader, val_loader, epochs=10)
+    #trainer.fit(train_loader, val_loader, epochs=10)
     trainer = BertTrainer(model, optimizer=None,
-                      checkpoint_dir=os.path.join('./checkpoints/out/bert',SOURCE),
+                      checkpoint_dir=os.path.join('./checkpoints/bert', TARGET),
                       model_checkpoint='experiment_model.best.pth',
                       device=DEVICE)
-    #dataset2 = AmazonZiser17(ds=TARGET, dl=1, labeled=True, cldata=False)
-    #import ipdb; ipdb.set_trace()
     for TARGET in targets:
-        if SOURCE != TARGET:
-           dataset2 = AmazonZiser17(ds=TARGET, dl=1, labeled=True, cldata=False)
-           test_loader = DataLoader(
-               dataset2,
-               batch_size=1,
-               drop_last=False,
-               collate_fn=collate_fn)
-           file = "B" + SOURCE + TARGET + ".txt"
-           with open(file, "w") as f:
-              print(SOURCE, file=f)
-              print(TARGET, file=f)
-              print(evaluation(trainer, test_loader, DEVICE), file=f)
+       dataset2 = AmazonZiser17(ds=TARGET, dl=0, labeled=True, cldata=False)
+       test_loader = DataLoader(
+            dataset2,
+            batch_size=1,
+            drop_last=False,
+            collate_fn=collate_fn)
+       #print(SOURCE)
+       print(TARGET)
+       print(evaluation(trainer, test_loader, DEVICE))

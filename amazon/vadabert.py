@@ -21,17 +21,17 @@ import argparse
 parser = argparse.ArgumentParser(description="Domains and losses")
 parser.add_argument("-s", "--source", default="books", help="Source Domain")
 parser.add_argument("-t", "--target", default="dvd", help="Target Domain")
-parser.add_argument("-a", type=float, default=0.01, help="Domain Adversarial HyperParameter")
-parser.add_argument("-b", type=float, default=0.01, help="C.E. HyperParameter")
-parser.add_argument("-c", type=float, default=0.01, help="VAT HyperParameter")
-parser.add_argument("-i", default="0", help="Path")
+#parser.add_argument("-a", type=float, default=0.01, help="Domain Adversarial HyperParameter")
+#parser.add_argument("-b", type=float, default=0.0, help="C.E. HyperParameter")
+#parser.add_argument("-c", type=float, default=0.0, help="VAT HyperParameter")
+#parser.add_argument("-i", default="0", help="Path")
 args = parser.parse_args()
 SOURCE = args.source
 TARGET = args.target
-a = args.a
-b = args.b
-c = args.c
-path = args.i
+a = 0.01 #args.a
+b = 0 #args.b
+c = 0 #args.c
+#path = args.i
 
 def transform_pred_tar(output):
     y_pred, targets, d  = output
@@ -64,13 +64,13 @@ def evaluation(trainer, test_loader, device):
             label = batch[1].to(device)
             domain = batch[2].to(device)
             length = batch[3].to(device)
-            pred, _ = trainer.model(review, length)
+            pred, _ = trainer.model(review)
             metric.update((pred, label))
     acc = metric.compute()
     return acc
 
 #DEVICE = 'cpu'
-DEVICE = 'cuda:1' if torch.cuda.is_available() else 'cpu'
+DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 collate_fn = BertDACollator(device='cpu')
 
@@ -93,7 +93,7 @@ def dataloaders_from_datasets(source_dataset, target_dataset, test_dataset,
 
     testset_size = len(test_dataset)
     test_indices = list(range(testset_size))
-    x = 4
+    x = 1
     train_sampler = DASubsetRandomSampler(s_train_indices, t_train_indices, s_dataset_size, x, batch_train)
     val_sampler = DASubsetRandomSampler(s_val_indices, t_val_indices, s_dataset_size, x, batch_val)
     #test_sampler = SubsetRandomSampler(test_indices)
@@ -119,21 +119,29 @@ def dataloaders_from_datasets(source_dataset, target_dataset, test_dataset,
 
 
 if __name__ == '__main__':
-    source_dataset = AmazonZiser17(ds=SOURCE, dl=0, labeled=True)
-    target_dataset = AmazonZiser17(ds=TARGET, dl=1, labeled=False)
-    test_dataset = AmazonZiser17(ds=TARGET, dl=1, labeled=True, train=False)
+    source_dataset = AmazonZiser17(ds=SOURCE, dl=0, labeled=True, cldata=False)
+    target_dataset = AmazonZiser17(ds=TARGET, dl=1, labeled=False, cldata=False)
+    test_dataset = AmazonZiser17(ds=TARGET, dl=1, labeled=True, cldata=False)
     train_loader, dev_loader, test_loader = dataloaders_from_datasets(source_dataset, 
                                                                       target_dataset, 
                                                                       test_dataset, 
                                                                       4, 4, 1)
-    bertmodel = BertModel.from_pretrained('bert-base-uncased')
+    if TARGET == "books":
+       pre = './obooks'
+    elif TARGET == "dvd":
+       pre = './odvd'
+    elif TARGET == "electronics":
+       pre = './oele'
+    else:
+       pre = './okit'
+    bertmodel = BertModel.from_pretrained(pre)
     model = VADAClassifier(bertmodel, 768, 2, 2)
-    optimizer = Adam(model.parameters(), lr=1e-5, weight_decay=1e-2)
+    optimizer = AdamW(model.parameters(), lr=1e-5, correct_bias=False)
     cl_loss = nn.CrossEntropyLoss()
     da_loss = nn.CrossEntropyLoss()
     trg_cent_loss = ConditionalEntropyLoss()
     vat_loss = VAT(model)
-    criterion = VADALoss(cl_loss, da_loss, trg_cent_loss, vat_loss, a, b, c, 12, 800)
+    criterion = VADALoss(cl_loss, da_loss, trg_cent_loss, vat_loss, a, b, c, 10, 1600)
     metrics = {
         'loss': Loss(criterion),
         'accuracy': Accuracy(transform_pred_tar),
@@ -141,18 +149,21 @@ if __name__ == '__main__':
         'Class. Loss': Loss(cl_loss, transform_pred_tar),
         'D.A. Loss': Loss(da_loss, transform_d)
     }
+    path = SOURCE+TARGET
     trainer = BertVADATrainer(model, optimizer,
-                              checkpoint_dir=os.path.join("./checkpoints", path),
+                              checkpoint_dir=os.path.join("./checkpoints/out/da2", path),
                               metrics=metrics,
                               non_blocking=True,
                               retain_graph=True,
-                              patience=3,
+                              patience=10,
                               loss_fn=criterion,
                               device=DEVICE)
     trainer.fit(train_loader, dev_loader, epochs=10)
     trainer = BertVADATrainer(model, optimizer=None,
-                              checkpoint_dir= os.path.join("./checkpoints", path),
+                              checkpoint_dir= os.path.join("./checkpoints/da2", path),
                               model_checkpoint='experiment_model.best.pth',
                               device=DEVICE)
-    print(a, b, c, SOURCE, TARGET)
-    print(evaluation(trainer, test_loader, DEVICE))
+    file = "DA" + path + ".txt"
+    with open(file, "w") as f:
+       print(a, b, c, SOURCE, TARGET, file=f)
+       print(evaluation(trainer, test_loader, DEVICE), file=f)

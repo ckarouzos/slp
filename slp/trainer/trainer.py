@@ -84,6 +84,10 @@ class Trainer(object):
         self.pbar = ProgressBar()
         self.val_pbar = ProgressBar(desc='Validation')
 
+        #def returnepoch(engine):
+        #    return float(engine.state.epoch)
+        
+        #fn = lambda x : returnepoch(x)
         if checkpoint_dir is not None:
             self.checkpoint = CheckpointHandler(
                 checkpoint_dir, experiment_name, score_name='validation_loss',
@@ -94,7 +98,7 @@ class Trainer(object):
             patience, self._score_fn, self.trainer)
 
         self.val_handler = EvaluationHandler(pbar=self.pbar,
-                                             validate_every=1,
+                                             validate_every=self.validate_every,
                                              early_stopping=self.early_stop)
         self.attach()
         log.info(
@@ -411,7 +415,7 @@ class DoubleBertTrainer(Trainer):
         #import ipdb; ipdb.set_trace()
         loss = loss / self.accumulation_steps
         loss.backward(retain_graph=self.retain_graph)
-        if (self.trainer.state.iteration + 2) % self.accumulation_steps == 0:
+        if (self.trainer.state.iteration + 1) % self.accumulation_steps == 0:
             self.optimizer.step()  # type: ignore
             self.optimizer.zero_grad()
         loss_value: float = loss.item()

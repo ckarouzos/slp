@@ -1,9 +1,7 @@
-import os
 import numpy as np
-
+import os
 import torch
 import torch.nn as nn
-
 
 from ignite.metrics import Loss, Accuracy
 from sklearn.preprocessing import LabelEncoder
@@ -13,22 +11,22 @@ from torch.utils.data import Dataset, DataLoader, ConcatDataset, SubsetRandomSam
 
 from slp.data.collators import BertCollator
 from transformers import *
-from slp.data.bertamz import AmazonZiser17
+from slp.data.bertamz import AmazonZiser17, NewLabelsData
 from slp.data.transforms import SpacyTokenizer, ToTokenIds, ToTensor
 from slp.modules.classifier import BertClassifier
 from slp.modules.rnn import WordRNN
-from slp.trainer.trainer import BertTrainer
+from slp.trainer.trainer import BertTrainer, AugmentBertTrainer
 from slp.util.embeddings import EmbeddingsLoader
 from slp.util.parallel import DataParallelCriterion, DataParallelModel
 
 import argparse
 parser = argparse.ArgumentParser(description="Domains and losses")
 parser.add_argument("-s", "--source", default="books", help="Source Domain")
-#parser.add_argument("-t", "--target", default="dvd", help="Target Domain")
+parser.add_argument("-t", "--target", default="dvd", help="Target Domain")
 args = parser.parse_args()
 SOURCE = args.source
-#TARGET = args.target
-targets = ["dvd", "books", "electronics", "kitchen"]
+TARGET = args.target
+#targets = ["dvd", "books", "electronics", "kitchen"]
 
 def transform_pred_tar(output):
     y_pred, targets, d  = output
@@ -57,7 +55,7 @@ def evaluation(trainer, test_loader, device):
 
 #DEVICE = 'cpu'
 #DEVICE = 'cuda:0' if torch.cuda.is_available() else 'cpu'
-DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 collate_fn = BertCollator(device='cpu')
 
@@ -86,19 +84,32 @@ if __name__ == '__main__':
         drop_last=False,
         collate_fn=collate_fn)
 
+    if TARGET == "books":
+       pre = './sbooks'
+    elif TARGET == "dvd":
+       pre = './sdvd'
+    elif TARGET == "electronics":
+       pre = './sele'
+    else:
+       pre = './skit'
+
+    #config = BertConfig.from_json_file('./config.json')
     #bertmodel = BertModel.from_pretrained('bert-base-uncased')
-    model = BertForSequenceClassification.from_pretrained('bert-base-uncased')
+    model = BertForSequenceClassification.from_pretrained(pre)
+    #for names, parameters in model.bert.named_parameters():
+    #    parameters.requiers_grad=False
 
     #optimizer = Adam([p for p in model.parameters() if p.requires_grad], lr=1e-3)
     optimizer = AdamW(model.parameters(), lr=1e-5, correct_bias=False)
-    criterion = nn.CrossEntropyLoss()
+    criterion = nn.CrossEntropyLoss() 
     metrics = {
         'loss': Loss(criterion),
         'accuracy': Accuracy()
     }
-    trainer = BertTrainer(model, optimizer,
+    path=SOURCE+TARGET
+    trainer = AugmentBertTrainer(model, optimizer,
                       newbob_period=3,
-                      checkpoint_dir=os.path.join('./checkpoints/out/bert',SOURCE),
+                      checkpoint_dir=os.path.join('./checkpoints/bert', path),
                       metrics=metrics,
                       non_blocking=True,
                       retain_graph=True,
@@ -106,23 +117,26 @@ if __name__ == '__main__':
                       loss_fn=criterion,
                       device=DEVICE,
                       parallel=False)
-    trainer.fit(train_loader, val_loader, epochs=10)
-    trainer = BertTrainer(model, optimizer=None,
-                      checkpoint_dir=os.path.join('./checkpoints/out/bert',SOURCE),
+
+    dataset2 = AmazonZiser17(ds=TARGET, dl=1, labeled=False, cldata=True)
+    unlabeled_loader = DataLoader(
+         dataset2,
+         batch_size=1,
+         drop_last=False,
+         collate_fn=collate_fn)
+
+    trainer.fit(train_loader, unlabeled_loader, val_loader, epochs=10)
+    trainer = AugmentBertTrainer(model, optimizer=None,
+                      checkpoint_dir=os.path.join('./checkpoints/bert',path),
                       model_checkpoint='experiment_model.best.pth',
                       device=DEVICE)
-    #dataset2 = AmazonZiser17(ds=TARGET, dl=1, labeled=True, cldata=False)
-    #import ipdb; ipdb.set_trace()
-    for TARGET in targets:
-        if SOURCE != TARGET:
-           dataset2 = AmazonZiser17(ds=TARGET, dl=1, labeled=True, cldata=False)
-           test_loader = DataLoader(
-               dataset2,
-               batch_size=1,
-               drop_last=False,
-               collate_fn=collate_fn)
-           file = "B" + SOURCE + TARGET + ".txt"
-           with open(file, "w") as f:
-              print(SOURCE, file=f)
-              print(TARGET, file=f)
-              print(evaluation(trainer, test_loader, DEVICE), file=f)
+
+    final_test_loader = DataLoader(
+         dataset2,
+         batch_size=1,
+         drop_last=False,
+         collate_fn=collate_fn)
+
+    print(SOURCE)
+    print(TARGET)
+    print(evaluation(trainer, final_test_loader, DEVICE))
